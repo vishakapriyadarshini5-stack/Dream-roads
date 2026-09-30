@@ -57,21 +57,125 @@ for(let i=0;i<=N;i++){const j=i%N,t=T[j],y=H[j]+.1;rp.push(P[j].x-t.z*6,y,P[j].z
 for(let i=0;i<N;i++){const a=2*i;ri.push(a,a+2,a+1,a+1,a+2,a+3)}
 const rg=new THREE.BufferGeometry();rg.setAttribute('position',new THREE.Float32BufferAttribute(rp,3));rg.setIndex(ri);rg.computeVertexNormals();
 scene.add(new THREE.Mesh(rg,new THREE.MeshLambertMaterial({color:0x3b3b42,side:THREE.DoubleSide})));}
-// trees
-{const tm=new THREE.InstancedMesh(new THREE.ConeGeometry(2.2,7,6).translate(0,3.5,0),new THREE.MeshLambertMaterial({color:0x2f6b34,flatShading:true}),260),d=new THREE.Object3D();let c=0;
-for(let a=0;a<4000&&c<260;a++){const x=(R()-.5)*600,z=(R()-.5)*600,h=hAt(x,z);if(h<1.6||h>26||near(x,z).d<12)continue;const s=.8+R()*.8;d.position.set(x,h-.3,z);d.scale.set(s,s*(.8+R()*.6),s);d.updateMatrix();tm.setMatrixAt(c++,d.matrix)}
-tm.count=c;scene.add(tm);}
+// trees — greener, natural trunks + guaranteed-visible layered foliage
+{
+  const trunkGeo=new THREE.CylinderGeometry(.22,.34,2.8,7);
+  const trunkMat=new THREE.MeshLambertMaterial({color:0x65452e,flatShading:true});
+  const leafColors=[0x2f7133,0x397d37,0x45883d];
+
+  for(let a=0,c=0;a<6000&&c<260;a++){
+    const x=(R()-.5)*600,z=(R()-.5)*600,h=hAt(x,z);
+    if(h<1.6||h>26||near(x,z).d<13)continue;
+
+    const s=.72+R()*1.0;
+    const trunk=new THREE.Mesh(trunkGeo,trunkMat);
+    trunk.position.set(x,h+1.05,z);
+    trunk.scale.set(s*(.85+R()*.25),s*(.9+R()*.35),s*(.85+R()*.25));
+    scene.add(trunk);
+
+    // Three separate crowns. Direct scene placement avoids the old group/rendering issue.
+    const layers=2+(R()>.55?1:0);
+    for(let q=0;q<layers;q++){
+      const leafGeo=new THREE.ConeGeometry(1.7,3.6,9);
+      const leafMat=new THREE.MeshBasicMaterial({
+        color:leafColors[(c+q)%leafColors.length],
+        flatShading:true,
+        side:THREE.DoubleSide
+      });
+      const leaf=new THREE.Mesh(leafGeo,leafMat);
+      const ls=s*(1.08-q*.16);
+      leaf.position.set(
+        x+(R()-.5)*.45*s,
+        h+2.8*s+q*1.15*s,
+        z+(R()-.5)*.45*s
+      );
+      leaf.scale.set(ls,ls*(.85+R()*.2),ls);
+      leaf.rotation.y=R()*Math.PI*2;
+      scene.add(leaf);
+    }
+    c++;
+  }
+}
 // houses
 {const bg=new THREE.BoxGeometry(6,4,7),rg=new THREE.ConeGeometry(5.6,3,4),bm=new THREE.MeshLambertMaterial({color:0xf0e2c8,flatShading:true}),rm=new THREE.MeshLambertMaterial({color:0xc4542d,flatShading:true});
 for(let k=0;k<16;k++){const i=(k*30+12)%N,t=T[i];for(const s of[1,-1]){const x=P[i].x-t.z*16*s,z=P[i].z+t.x*16*s,h=hAt(x,z);if(h<2)continue;
 const b=new THREE.Mesh(bg,bm),r=new THREE.Mesh(rg,rm),hd=Math.atan2(t.x,t.z);b.position.set(x,h+1.7,z);b.rotation.y=hd;r.position.set(x,h+5.2,z);r.rotation.y=hd+Math.PI/4;scene.add(b,r);break}}}
-// cars
-function mkCar(o){const g=new THREE.Group(),m=new THREE.MeshLambertMaterial({color:o.c,flatShading:true});
-const body=new THREE.Mesh(new THREE.BoxGeometry(o.w,o.h,o.l,3,2,5),m);body.position.y=.55+o.h/2;g.add(body);
-const cab=new THREE.Mesh(new THREE.BoxGeometry(o.w*.85,o.ch,o.l*o.cl),new THREE.MeshLambertMaterial({color:0x22303c,flatShading:true}));cab.position.set(0,.55+o.h+o.ch/2,o.co);g.add(cab);
-const wg=new THREE.CylinderGeometry(.42,.42,.3,10).rotateZ(Math.PI/2),wm=new THREE.MeshLambertMaterial({color:0x151515});
-for(const sx of[-1,1])for(const sz of[-1,1]){const w=new THREE.Mesh(wg,wm);w.position.set(sx*o.w/2,.42,sz*o.l*.32);g.add(w)}
-g.userData={body,orig:Float32Array.from(body.geometry.attributes.position.array),hits:0};scene.add(g);return g}
+// cars — more detailed low-poly bodies, glass, lights, bumpers and wheels
+function mkCar(o){
+  const g=new THREE.Group();
+  const bodyMat=new THREE.MeshLambertMaterial({color:o.c,flatShading:true});
+  const darkMat=new THREE.MeshLambertMaterial({color:0x18232b,flatShading:true});
+  const glassMat=new THREE.MeshLambertMaterial({color:0x49616d,flatShading:true,transparent:true,opacity:.82});
+  const tireMat=new THREE.MeshLambertMaterial({color:0x171717,flatShading:true});
+  const hubMat=new THREE.MeshLambertMaterial({color:0xb7b9b5,flatShading:true});
+  const lampMat=new THREE.MeshLambertMaterial({color:0xfff4c7,flatShading:true});
+  const tailMat=new THREE.MeshLambertMaterial({color:0x8f1717,flatShading:true});
+
+  const body=new THREE.Mesh(
+    new THREE.BoxGeometry(o.w,o.h,o.l,4,2,6),bodyMat
+  );
+  body.position.y=.58+o.h/2;
+  g.add(body);
+
+  // Hood and rear deck make the silhouette less like a rectangular block.
+  const hood=new THREE.Mesh(new THREE.BoxGeometry(o.w*.9,.28,o.l*.30),bodyMat);
+  hood.position.set(0,.78+o.h,o.l*.29);
+  g.add(hood);
+
+  const cabin=new THREE.Mesh(
+    new THREE.BoxGeometry(o.w*.82,o.ch,o.l*o.cl,2,1,3),glassMat
+  );
+  cabin.position.set(0,.68+o.h+o.ch/2,o.co);
+  g.add(cabin);
+
+  // roof frame / pillars
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(o.w*.86,.13,o.l*o.cl*1.02),darkMat);
+  roof.position.set(0,.68+o.h+o.ch+.02,o.co);
+  g.add(roof);
+
+  // front/rear bumpers
+  for(const z of[-1,1]){
+    const bumper=new THREE.Mesh(new THREE.BoxGeometry(o.w*.92,.18,.16),darkMat);
+    bumper.position.set(0,.58,z*(o.l/2+.04));
+    g.add(bumper);
+  }
+
+  // headlights and tail lights
+  for(const sx of[-1,1]){
+    const f=new THREE.Mesh(new THREE.BoxGeometry(.24,.16,.08),lampMat);
+    f.position.set(sx*o.w*.30,.82+o.h,o.l/2+.085);
+    g.add(f);
+    const ta=new THREE.Mesh(new THREE.BoxGeometry(.24,.16,.08),tailMat);
+    ta.position.set(sx*o.w*.30,.82+o.h,-o.l/2-.085);
+    g.add(ta);
+  }
+
+  const wg=new THREE.CylinderGeometry(.43,.43,.32,12).rotateZ(Math.PI/2);
+  for(const sx of[-1,1])for(const sz of[-1,1]){
+    const w=new THREE.Mesh(wg,tireMat);
+    w.position.set(sx*(o.w/2+.02),.43,sz*o.l*.32);
+    g.add(w);
+
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(.17,.17,.34,10).rotateZ(Math.PI/2),hubMat);
+    hub.position.copy(w.position);
+    g.add(hub);
+  }
+
+  // simple side mirrors
+  for(const sx of[-1,1]){
+    const mirror=new THREE.Mesh(new THREE.BoxGeometry(.12,.16,.25),darkMat);
+    mirror.position.set(sx*(o.w/2+.10),.92+o.h,o.co+o.l*.16);
+    g.add(mirror);
+  }
+
+  g.userData={
+    body,
+    orig:Float32Array.from(body.geometry.attributes.position.array),
+    hits:0
+  };
+  scene.add(g);
+  return g;
+}
 function place(g,x,z,h){const y=hAt(x,z),f=hAt(x+Math.sin(h)*2,z+Math.cos(h)*2),b=hAt(x-Math.sin(h)*2,z-Math.cos(h)*2);g.rotation.order='YXZ';g.position.set(x,y+.3,z);g.rotation.set(-Math.atan2(f-b,4),h,0)}
 function dent(g,wp,amt){const u=g.userData;if(u.hits>=9)return;u.hits++;const b=u.body,p=b.geometry.attributes.position,l=g.worldToLocal(wp.clone());l.y-=b.position.y;
 for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),d=Math.hypot(x-l.x,y-l.y,z-l.z);if(d<2.2){const f=(1-d/2.2)*amt;p.setXYZ(i,x*(1-f*.22)+(R()-.5)*f*.3,y*(1-f*.12)+(R()-.5)*f*.3,z*(1-f*.22)+(R()-.5)*f*.3)}}
@@ -99,12 +203,12 @@ let last=performance.now();
 function frame(now){requestAnimationFrame(frame);const dt=Math.min(.05,(now-last)/1000);last=now;
   const up=K.KeyW||K.ArrowUp,dn=K.KeyS||K.ArrowDown,lf=K.KeyA||K.ArrowLeft,rt=K.KeyD||K.ArrowRight;
   let v=pl.v;
-  if(up)v+=(v<0?40:24)*dt;if(dn)v-=(v>0?44:12)*dt;
+  if(up)v+=(v<0?38:23)*dt;if(dn)v-=(v>0?46:13)*dt;
   if(K.Space)v-=Math.sign(v)*Math.min(Math.abs(v),50*dt);
   v-=v*.25*dt;v-=Math.sign(v)*Math.min(Math.abs(v),3*dt);
   if(near(pl.x,pl.z).d>7)v-=v*Math.min(1,1.2*dt);
   v=cl(v,-10,48);
-  pl.h+=((lf?1:0)-(rt?1:0))*dt*1.7*cl(v/8,-1,1)/(1+Math.abs(v)/40);
+  pl.h+=((lf?1:0)-(rt?1:0))*dt*1.85*cl(v/7,-1,1)/(1+Math.abs(v)/36);
   pl.x+=Math.sin(pl.h)*v*dt;pl.z+=Math.cos(pl.h)*v*dt;pl.v=v;
   if(hAt(pl.x,pl.z)<.2)respawn();
   place(pg,pl.x,pl.z,pl.h);
