@@ -31,7 +31,6 @@
       box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
     }
 
-    /* Top Left Speedometer */
     #hud-main {
       position: absolute;
       top: 24px;
@@ -45,7 +44,6 @@
     #unit { font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-sub); }
     #gear { font-size: 18px; font-weight: 600; color: #ffd700; margin-left: 8px; }
 
-    /* Bottom Control Instructions */
     #hud-controls {
       position: absolute;
       bottom: 24px;
@@ -64,7 +62,6 @@
       font-weight: 600;
     }
 
-    /* Top Right Environmental Controls */
     #hud-settings {
       position: absolute;
       top: 24px;
@@ -107,10 +104,8 @@
 
   <div id="hud-settings" class="glass-panel">
     <button class="btn-icon" id="time-btn">☀️ Day</button>
-    <button class="btn-icon" id="audio-btn">🔊 Sound On</button>
   </div>
 
-  <!-- Three.js + Simplex Noise -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/simplex-noise@2.4.0/simplex-noise.min.js"></script>
 
@@ -128,10 +123,23 @@
     }
 
     function getRoadPath(z) {
-      // Smooth sinusoidal serpentine road path along Z axis
       let x = Math.sin(z * 0.008) * 60 + Math.sin(z * 0.02) * 20;
-      let dx = Math.cos(z * 0.008) * 0.48 + Math.cos(z * 0.02) * 0.4; // derivative for tangent direction
-      return { x, dx };
+      return { x };
+    }
+
+    function getGroundHeightAt(x, z) {
+      const roadInfo = getRoadPath(z);
+      const distToRoad = Math.abs(x - roadInfo.x);
+      let h = getTerrainHeight(x, z);
+
+      const roadWidth = 8;
+      const blendWidth = 12;
+      if (distToRoad < roadWidth + blendWidth) {
+        const roadH = getTerrainHeight(roadInfo.x, z);
+        const factor = THREE.MathUtils.smoothstep(distToRoad, roadWidth, roadWidth + blendWidth);
+        h = THREE.MathUtils.lerp(roadH, h, factor);
+      }
+      return h;
     }
 
     // --- THREE.JS INITIALIZATION ---
@@ -200,27 +208,13 @@
         const wx = pos.getX(i) + worldXOffset;
         const wz = pos.getZ(i) + worldZOffset;
 
-        const roadInfo = getRoadPath(wz);
-        const distToRoad = Math.abs(wx - roadInfo.x);
-
-        let h = getTerrainHeight(wx, wz);
-
-        // Smooth road flattening transition
-        const roadWidth = 8;
-        const blendWidth = 12;
-        if (distToRoad < roadWidth + blendWidth) {
-          const roadH = getTerrainHeight(roadInfo.x, wz);
-          const factor = THREE.MathUtils.smoothstep(distToRoad, roadWidth, roadWidth + blendWidth);
-          h = THREE.MathUtils.lerp(roadH, h, factor);
-        }
-
+        const h = getGroundHeightAt(wx, wz);
         pos.setY(i, h);
 
-        // Terrain color blending
         const col = new THREE.Color();
-        if (h < 5) col.setHSL(0.12, 0.4, 0.65); // Sandy shore/low ground
-        else if (h < 30) col.setHSL(0.28 + Math.random() * 0.04, 0.5, 0.45); // Lush green grass
-        else col.setHSL(0.25, 0.3, 0.35); // Dark mountain grass/rock
+        if (h < 5) col.setHSL(0.12, 0.4, 0.65);
+        else if (h < 30) col.setHSL(0.28 + Math.random() * 0.04, 0.5, 0.45);
+        else col.setHSL(0.25, 0.3, 0.35);
 
         colors.push(col.r, col.g, col.b);
       }
@@ -233,7 +227,7 @@
       terrainMesh.receiveShadow = true;
       group.add(terrainMesh);
 
-      // --- ROAD RIBBON SEGMENT ---
+      // --- ROAD RIBBON ---
       const roadGeo = new THREE.PlaneGeometry(10, CHUNK_SIZE, 2, CHUNK_SEGMENTS);
       roadGeo.rotateX(-Math.PI / 2);
       const rPos = roadGeo.attributes.position;
@@ -244,7 +238,7 @@
         const rx = rPos.getX(i);
 
         rPos.setX(i, roadInfo.x + rx);
-        rPos.setY(i, getTerrainHeight(roadInfo.x, wz) + 0.15);
+        rPos.setY(i, getGroundHeightAt(roadInfo.x + rx, wz) + 0.05);
       }
       roadGeo.computeVertexNormals();
 
@@ -253,7 +247,6 @@
       roadMesh.receiveShadow = true;
       group.add(roadMesh);
 
-      // --- DECORATION (Trees & Rocks) ---
       populateDecorations(group, worldXOffset, worldZOffset);
 
       scene.add(group);
@@ -273,9 +266,9 @@
         const wz = worldZ + lz;
 
         const roadInfo = getRoadPath(wz);
-        if (Math.abs(wx - roadInfo.x) < 14) continue; // Keep road clear
+        if (Math.abs(wx - roadInfo.x) < 14) continue;
 
-        const wy = getTerrainHeight(wx, wz);
+        const wy = getGroundHeightAt(wx, wz);
         if (wy < 2) continue;
 
         const tree = new THREE.Group();
@@ -327,19 +320,16 @@
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.8 });
       const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
 
-      // Chassis
       const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 4.2), bodyMat);
       body.position.y = 0.6;
       body.castShadow = true;
       car.add(body);
 
-      // Cabin Roof
       const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 2.2), glassMat);
       cabin.position.set(0, 1.15, -0.2);
       cabin.castShadow = true;
       car.add(cabin);
 
-      // Wheels
       const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 16);
       wheelGeo.rotateZ(Math.PI / 2);
       const wheels = [];
@@ -360,16 +350,17 @@
       });
 
       scene.add(car);
-      return { mesh: car, wheels, body };
+      return { mesh: car, wheels, body, wheelOffsets: offsets };
     }
 
     const vehicle = createVehicle();
 
-    // --- VEHICLE PHYSICS & CONTROLS ---
+    // --- VEHICLE PHYSICS & ROAD ALIGNMENT ---
     const state = {
       x: 0, z: 0, speed: 0, heading: 0,
       steering: 0, maxSpeed: 42, accel: 18,
-      decel: 12, friction: 6, brake: 32
+      decel: 12, friction: 6, brake: 32,
+      smoothY: 0, smoothQuaternion: new THREE.Quaternion()
     };
 
     const keys = {};
@@ -391,13 +382,11 @@
       const steerRight = keys['KeyD'] || keys['ArrowRight'];
       const handbrake = keys['Space'];
 
-      // Acceleration / Deceleration logic
       if (throttle) {
         state.speed = Math.min(state.maxSpeed, state.speed + state.accel * dt);
       } else if (braking) {
         state.speed = Math.max(-12, state.speed - state.brake * dt);
       } else {
-        // Natural coasting friction
         if (state.speed > 0) state.speed = Math.max(0, state.speed - state.friction * dt);
         if (state.speed < 0) state.speed = Math.min(0, state.speed + state.friction * dt);
       }
@@ -406,32 +395,57 @@
         state.speed = THREE.MathUtils.lerp(state.speed, 0, dt * 3);
       }
 
-      // Steering
       const steerTarget = (steerLeft ? 1 : 0) - (steerRight ? 1 : 0);
       state.steering = THREE.MathUtils.lerp(state.steering, steerTarget, dt * 8);
 
       const turnFactor = state.steering * (0.6 + 0.4 * (1 - Math.abs(state.speed) / state.maxSpeed));
       state.heading += turnFactor * (state.speed / 15) * dt;
 
-      // Position Update
       state.x += Math.sin(state.heading) * state.speed * dt;
       state.z += Math.cos(state.heading) * state.speed * dt;
 
-      // Height Sampling
-      const currentY = getTerrainHeight(state.x, state.z);
+      // --- 4-WHEEL SUSPENSION & ROAD PLANE ALIGNMENT ---
+      const wheelWorldPositions = vehicle.wheelOffsets.map(([wx, wy, wz]) => {
+        // Transform local wheel offsets into world coordinates according to car heading
+        const cosH = Math.cos(state.heading);
+        const sinH = Math.sin(state.heading);
+        const worldX = state.x + (wx * cosH + wz * sinH);
+        const worldZ = state.z + (-wx * sinH + wz * cosH);
+        const worldY = getGroundHeightAt(worldX, worldZ);
+        return new THREE.Vector3(worldX, worldY, worldZ);
+      });
 
-      // Mesh Transform Update
-      vehicle.mesh.position.set(state.x, currentY, state.z);
-      vehicle.mesh.rotation.y = state.heading;
+      // Calculate average height under all 4 wheels
+      const avgY = (wheelWorldPositions[0].y + wheelWorldPositions[1].y + wheelWorldPositions[2].y + wheelWorldPositions[3].y) / 4;
+      state.smoothY = THREE.MathUtils.lerp(state.smoothY, avgY, dt * 15);
 
-      // Body Pitch / Roll physics effects
+      // Calculate Front-to-Back (Pitch) & Left-to-Right (Roll) Vectors
+      const frontAvgY = (wheelWorldPositions[0].y + wheelWorldPositions[1].y) / 2;
+      const rearAvgY = (wheelWorldPositions[2].y + wheelWorldPositions[3].y) / 2;
+      const pitchAngle = Math.atan2(frontAvgY - rearAvgY, 2.6); // 2.6 = wheelbase length
+
+      const leftAvgY = (wheelWorldPositions[0].y + wheelWorldPositions[2].y) / 2;
+      const rightAvgY = (wheelWorldPositions[1].y + wheelWorldPositions[3].y) / 2;
+      const rollAngle = Math.atan2(leftAvgY - rightAvgY, 1.9);  // 1.9 = wheel track width
+
+      // Build target rotation matrix
+      const targetEuler = new THREE.Euler(pitchAngle, state.heading, -rollAngle, 'YXZ');
+      const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
+      
+      state.smoothQuaternion.slerp(targetQuat, dt * 12);
+
+      // Apply transformation to vehicle group
+      vehicle.mesh.position.set(state.x, state.smoothY, state.z);
+      vehicle.mesh.quaternion.copy(state.smoothQuaternion);
+
+      // Body inertia lean effects
       vehicle.body.rotation.z = THREE.MathUtils.lerp(vehicle.body.rotation.z, -state.steering * state.speed * 0.003, dt * 5);
-      vehicle.body.rotation.x = THREE.MathUtils.lerp(vehicle.body.rotation.x, (throttle ? -0.05 : 0) + (braking ? 0.08 : 0), dt * 5);
+      vehicle.body.rotation.x = THREE.MathUtils.lerp(vehicle.body.rotation.x, (throttle ? -0.04 : 0) + (braking ? 0.06 : 0), dt * 5);
 
-      // Wheel Rotations
+      // Wheel Spins
       vehicle.wheels.forEach((w, i) => {
         w.rotation.x += (state.speed / 0.38) * dt;
-        if (i < 2) w.rotation.y = state.steering * 0.4; // Steering on front wheels
+        if (i < 2) w.rotation.y = state.steering * 0.4;
       });
 
       // Update UI
@@ -445,24 +459,24 @@
 
     function updateCamera(dt) {
       const camDistance = 10 + Math.abs(state.speed) * 0.08;
-      const camHeight = 4.5 + Math.abs(state.speed) * 0.02;
+      const camHeight = 4.0 + Math.abs(state.speed) * 0.02;
 
       const cx = state.x - Math.sin(state.heading) * camDistance;
       const cz = state.z - Math.cos(state.heading) * camDistance;
-      const cy = getTerrainHeight(cx, cz) + camHeight;
+      const cy = getGroundHeightAt(cx, cz) + camHeight;
 
-      cameraPosTarget.set(cx, Math.max(cy, getTerrainHeight(cx, cz) + 1.5), cz);
+      cameraPosTarget.set(cx, Math.max(cy, getGroundHeightAt(cx, cz) + 1.5), cz);
       camera.position.lerp(cameraPosTarget, 1 - Math.exp(-6 * dt));
 
       cameraTarget.set(
         state.x + Math.sin(state.heading) * 5,
-        getTerrainHeight(state.x, state.z) + 1.2,
+        state.smoothY + 1.2,
         state.z + Math.cos(state.heading) * 5
       );
       camera.lookAt(cameraTarget);
     }
 
-    // --- DAY/NIGHT TOGGLE & ENGINE SOUND ---
+    // --- DAY/NIGHT TOGGLE ---
     let isNight = false;
     document.getElementById('time-btn').addEventListener('click', () => {
       isNight = !isNight;
@@ -487,20 +501,17 @@
       updateChunks(state.z);
       updateCamera(dt);
 
-      // Sun follows player forward
       sun.position.z = state.z + 100;
 
       renderer.render(scene, camera);
     }
 
-    // Window Resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Start
     resetPlayer();
     requestAnimationFrame(animate);
   </script>
