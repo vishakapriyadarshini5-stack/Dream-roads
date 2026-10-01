@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Slow Roads Style Driving Simulation</title>
+  <title>Slow Roads Driving Simulation</title>
   <style>
     :root {
       --hud-bg: rgba(255, 255, 255, 0.15);
@@ -20,7 +20,6 @@
     }
     #canvas { width: 100vw; height: 100vh; display: block; }
     
-    /* Minimalist Glassmorphic UI */
     .glass-panel {
       background: var(--hud-bg);
       backdrop-filter: var(--hud-blur);
@@ -114,32 +113,35 @@
     const simplex = new SimplexNoise();
     function noise2D(x, y) { return simplex.noise2D(x, y); }
 
-    // --- PROCEDURAL ROAD & TERRAIN MATH ---
-    function getTerrainHeight(x, z) {
-      let elevation = noise2D(x * 0.002, z * 0.002) * 45;
-      elevation += noise2D(x * 0.008, z * 0.008) * 15;
-      elevation += noise2D(x * 0.02, z * 0.02) * 3;
+    // --- MATHEMATICAL ROAD & TERRAIN SYSTEM ---
+    function getRawTerrainHeight(x, z) {
+      let elevation = noise2D(x * 0.002, z * 0.002) * 40;
+      elevation += noise2D(x * 0.008, z * 0.008) * 12;
+      elevation += noise2D(x * 0.02, z * 0.02) * 2;
       return elevation;
     }
 
     function getRoadPath(z) {
-      let x = Math.sin(z * 0.008) * 60 + Math.sin(z * 0.02) * 20;
+      const x = Math.sin(z * 0.008) * 60 + Math.sin(z * 0.02) * 20;
       return { x };
     }
 
-    function getGroundHeightAt(x, z) {
+    function getExactHeight(x, z) {
       const roadInfo = getRoadPath(z);
       const distToRoad = Math.abs(x - roadInfo.x);
-      let h = getTerrainHeight(x, z);
+      const terrainH = getRawTerrainHeight(x, z);
+      const roadH = getRawTerrainHeight(roadInfo.x, z);
 
-      const roadWidth = 8;
-      const blendWidth = 12;
-      if (distToRoad < roadWidth + blendWidth) {
-        const roadH = getTerrainHeight(roadInfo.x, z);
+      const roadWidth = 9;
+      const blendWidth = 14;
+
+      if (distToRoad < roadWidth) {
+        return roadH;
+      } else if (distToRoad < roadWidth + blendWidth) {
         const factor = THREE.MathUtils.smoothstep(distToRoad, roadWidth, roadWidth + blendWidth);
-        h = THREE.MathUtils.lerp(roadH, h, factor);
+        return THREE.MathUtils.lerp(roadH, terrainH, factor);
       }
-      return h;
+      return terrainH;
     }
 
     // --- THREE.JS INITIALIZATION ---
@@ -158,7 +160,7 @@
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 1000);
 
     // --- LIGHTING ---
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444455, 0.7);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444455, 0.75);
     scene.add(hemiLight);
 
     const sun = new THREE.DirectionalLight(0xfff5e6, 1.2);
@@ -177,22 +179,12 @@
 
     // --- INFINITE CHUNK SYSTEM ---
     const CHUNK_SIZE = 200;
-    const CHUNK_SEGMENTS = 40;
+    const CHUNK_SEGMENTS = 50;
     const VISIBILITY = 4;
     const activeChunks = new Map();
 
-    const terrainMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.9,
-      metalness: 0.1,
-      flatShading: true
-    });
-
-    const roadMat = new THREE.MeshStandardMaterial({
-      color: 0x2c2c34,
-      roughness: 0.6,
-      metalness: 0.2
-    });
+    const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x2b2b32, roughness: 0.5, metalness: 0.1 });
 
     function buildChunk(cx, cz) {
       const group = new THREE.Group();
@@ -208,12 +200,12 @@
         const wx = pos.getX(i) + worldXOffset;
         const wz = pos.getZ(i) + worldZOffset;
 
-        const h = getGroundHeightAt(wx, wz);
+        const h = getExactHeight(wx, wz);
         pos.setY(i, h);
 
         const col = new THREE.Color();
         if (h < 5) col.setHSL(0.12, 0.4, 0.65);
-        else if (h < 30) col.setHSL(0.28 + Math.random() * 0.04, 0.5, 0.45);
+        else if (h < 30) col.setHSL(0.28 + Math.random() * 0.03, 0.5, 0.42);
         else col.setHSL(0.25, 0.3, 0.35);
 
         colors.push(col.r, col.g, col.b);
@@ -227,8 +219,8 @@
       terrainMesh.receiveShadow = true;
       group.add(terrainMesh);
 
-      // --- ROAD RIBBON ---
-      const roadGeo = new THREE.PlaneGeometry(10, CHUNK_SIZE, 2, CHUNK_SEGMENTS);
+      // --- ROAD RIBBON MESH ---
+      const roadGeo = new THREE.PlaneGeometry(12, CHUNK_SIZE, 2, CHUNK_SEGMENTS);
       roadGeo.rotateX(-Math.PI / 2);
       const rPos = roadGeo.attributes.position;
 
@@ -238,7 +230,7 @@
         const rx = rPos.getX(i);
 
         rPos.setX(i, roadInfo.x + rx);
-        rPos.setY(i, getGroundHeightAt(roadInfo.x + rx, wz) + 0.05);
+        rPos.setY(i, getExactHeight(roadInfo.x + rx, wz) + 0.08);
       }
       roadGeo.computeVertexNormals();
 
@@ -259,16 +251,16 @@
       const leafMat = new THREE.MeshLambertMaterial({ color: 0x2e6f40, flatShading: true });
       const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3d28, flatShading: true });
 
-      for (let i = 0; i < 18; i++) {
+      for (let i = 0; i < 16; i++) {
         const lx = (Math.random() - 0.5) * CHUNK_SIZE;
         const lz = (Math.random() - 0.5) * CHUNK_SIZE;
         const wx = worldX + lx;
         const wz = worldZ + lz;
 
         const roadInfo = getRoadPath(wz);
-        if (Math.abs(wx - roadInfo.x) < 14) continue;
+        if (Math.abs(wx - roadInfo.x) < 15) continue;
 
-        const wy = getGroundHeightAt(wx, wz);
+        const wy = getExactHeight(wx, wz);
         if (wy < 2) continue;
 
         const tree = new THREE.Group();
@@ -312,55 +304,72 @@
       }
     }
 
-    // --- CAR VEHICLE CREATION ---
+    // --- CAR VEHICLE CREATION (FIXED ROTATIONAL ANCHORS) ---
     function createVehicle() {
       const car = new THREE.Group();
 
       const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2a75d3, roughness: 0.3, metalness: 0.4 });
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.8 });
-      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+      const hubMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.3 });
 
+      // Body offset elevated to match wheel radius (0.4m)
       const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 4.2), bodyMat);
-      body.position.y = 0.6;
+      body.position.y = 0.75;
       body.castShadow = true;
       car.add(body);
 
       const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 2.2), glassMat);
-      cabin.position.set(0, 1.15, -0.2);
+      cabin.position.set(0, 1.3, -0.2);
       cabin.castShadow = true;
       car.add(cabin);
 
-      const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 16);
-      wheelGeo.rotateZ(Math.PI / 2);
+      // Wheel geometries with clean local pivot orientation
+      const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+      wheelGeo.rotateZ(Math.PI / 2); // Cylinder now points correctly outward along X-axis
+
       const wheels = [];
+      const wheelPivots = [];
 
       const offsets = [
-        [-0.95, 0.38, 1.3],  // Front Left
-        [0.95, 0.38, 1.3],   // Front Right
-        [-0.95, 0.38, -1.3], // Rear Left
-        [0.95, 0.38, -1.3]   // Rear Right
+        [-0.95, 0.4, 1.3],  // Front Left
+        [0.95, 0.4, 1.3],   // Front Right
+        [-0.95, 0.4, -1.3], // Rear Left
+        [0.95, 0.4, -1.3]   // Rear Right
       ];
 
       offsets.forEach(([x, y, z]) => {
+        // Individual pivot group eliminates 24/7 wheel wobble
+        const pivot = new THREE.Group();
+        pivot.position.set(x, y, z);
+
         const w = new THREE.Mesh(wheelGeo, wheelMat);
-        w.position.set(x, y, z);
         w.castShadow = true;
-        car.add(w);
+
+        const hub = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.5), hubMat);
+        hub.position.x = x > 0 ? 0.02 : -0.02;
+        w.add(hub);
+
+        pivot.add(w);
+        car.add(pivot);
+
         wheels.push(w);
+        wheelPivots.push(pivot);
       });
 
       scene.add(car);
-      return { mesh: car, wheels, body, wheelOffsets: offsets };
+      return { mesh: car, wheels, wheelPivots, body, wheelOffsets: offsets };
     }
 
     const vehicle = createVehicle();
 
-    // --- VEHICLE PHYSICS & ROAD ALIGNMENT ---
+    // --- CAR PHYSICS & EXACT GROUND ALIGNMENT ---
     const state = {
       x: 0, z: 0, speed: 0, heading: 0,
-      steering: 0, maxSpeed: 42, accel: 18,
-      decel: 12, friction: 6, brake: 32,
-      smoothY: 0, smoothQuaternion: new THREE.Quaternion()
+      steering: 0, maxSpeed: 45, accel: 18,
+      decel: 12, friction: 5, brake: 32,
+      smoothY: 0,
+      pitch: 0, roll: 0
     };
 
     const keys = {};
@@ -392,86 +401,92 @@
       }
 
       if (handbrake) {
-        state.speed = THREE.MathUtils.lerp(state.speed, 0, dt * 3);
+        state.speed = THREE.MathUtils.lerp(state.speed, 0, dt * 4);
       }
 
       const steerTarget = (steerLeft ? 1 : 0) - (steerRight ? 1 : 0);
       state.steering = THREE.MathUtils.lerp(state.steering, steerTarget, dt * 8);
 
-      const turnFactor = state.steering * (0.6 + 0.4 * (1 - Math.abs(state.speed) / state.maxSpeed));
-      state.heading += turnFactor * (state.speed / 15) * dt;
+      const turnFactor = state.steering * (0.65 + 0.35 * (1 - Math.abs(state.speed) / state.maxSpeed));
+      state.heading += turnFactor * (state.speed / 14) * dt;
 
       state.x += Math.sin(state.heading) * state.speed * dt;
       state.z += Math.cos(state.heading) * state.speed * dt;
 
-      // --- 4-WHEEL SUSPENSION & ROAD PLANE ALIGNMENT ---
-      const wheelWorldPositions = vehicle.wheelOffsets.map(([wx, wy, wz]) => {
-        // Transform local wheel offsets into world coordinates according to car heading
-        const cosH = Math.cos(state.heading);
-        const sinH = Math.sin(state.heading);
-        const worldX = state.x + (wx * cosH + wz * sinH);
-        const worldZ = state.z + (-wx * sinH + wz * cosH);
-        const worldY = getGroundHeightAt(worldX, worldZ);
-        return new THREE.Vector3(worldX, worldY, worldZ);
-      });
+      // --- ACCURATE WHEEL HEIGHT & TILT SAMPLING ---
+      const cosH = Math.cos(state.heading);
+      const sinH = Math.sin(state.heading);
 
-      // Calculate average height under all 4 wheels
-      const avgY = (wheelWorldPositions[0].y + wheelWorldPositions[1].y + wheelWorldPositions[2].y + wheelWorldPositions[3].y) / 4;
-      state.smoothY = THREE.MathUtils.lerp(state.smoothY, avgY, dt * 15);
+      const getWheelWorldPos = (localX, localZ) => {
+        const wx = state.x + (localX * cosH + localZ * sinH);
+        const wz = state.z + (-localX * sinH + localZ * cosH);
+        return { x: wx, z: wz, y: getExactHeight(wx, wz) };
+      };
 
-      // Calculate Front-to-Back (Pitch) & Left-to-Right (Roll) Vectors
-      const frontAvgY = (wheelWorldPositions[0].y + wheelWorldPositions[1].y) / 2;
-      const rearAvgY = (wheelWorldPositions[2].y + wheelWorldPositions[3].y) / 2;
-      const pitchAngle = Math.atan2(frontAvgY - rearAvgY, 2.6); // 2.6 = wheelbase length
+      const fl = getWheelWorldPos(-0.95, 1.3);
+      const fr = getWheelWorldPos(0.95, 1.3);
+      const rl = getWheelWorldPos(-0.95, -1.3);
+      const rr = getWheelWorldPos(0.95, -1.3);
 
-      const leftAvgY = (wheelWorldPositions[0].y + wheelWorldPositions[2].y) / 2;
-      const rightAvgY = (wheelWorldPositions[1].y + wheelWorldPositions[3].y) / 2;
-      const rollAngle = Math.atan2(leftAvgY - rightAvgY, 1.9);  // 1.9 = wheel track width
+      // Average ground plane height
+      const targetY = (fl.y + fr.y + rl.y + rr.y) / 4;
+      state.smoothY = THREE.MathUtils.lerp(state.smoothY, targetY, dt * 18);
 
-      // Build target rotation matrix
-      const targetEuler = new THREE.Euler(pitchAngle, state.heading, -rollAngle, 'YXZ');
-      const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
-      
-      state.smoothQuaternion.slerp(targetQuat, dt * 12);
+      // Calculate terrain slope (Pitch) and transverse tilt (Roll)
+      const frontY = (fl.y + fr.y) / 2;
+      const rearY = (rl.y + rr.y) / 2;
+      const targetPitch = Math.atan2(frontY - rearY, 2.6);
 
-      // Apply transformation to vehicle group
+      const leftY = (fl.y + rl.y) / 2;
+      const rightY = (fr.y + rr.y) / 2;
+      const targetRoll = Math.atan2(leftY - rightY, 1.9);
+
+      state.pitch = THREE.MathUtils.lerp(state.pitch, targetPitch, dt * 12);
+      state.roll = THREE.MathUtils.lerp(state.roll, targetRoll, dt * 12);
+
+      // Apply Matrix Transformations cleanly in order: Y-heading -> Pitch -> Roll
       vehicle.mesh.position.set(state.x, state.smoothY, state.z);
-      vehicle.mesh.quaternion.copy(state.smoothQuaternion);
+      vehicle.mesh.rotation.set(0, 0, 0);
+      vehicle.mesh.rotation.y = state.heading;
+      vehicle.mesh.rotateX(-state.pitch);
+      vehicle.mesh.rotateZ(state.roll);
 
-      // Body inertia lean effects
-      vehicle.body.rotation.z = THREE.MathUtils.lerp(vehicle.body.rotation.z, -state.steering * state.speed * 0.003, dt * 5);
-      vehicle.body.rotation.x = THREE.MathUtils.lerp(vehicle.body.rotation.x, (throttle ? -0.04 : 0) + (braking ? 0.06 : 0), dt * 5);
+      // Smooth chassis inertia roll
+      vehicle.body.rotation.z = THREE.MathUtils.lerp(vehicle.body.rotation.z, -state.steering * state.speed * 0.003, dt * 6);
 
-      // Wheel Spins
+      // Wheel Spin & Steering (Without Wobble)
+      const spinDelta = (state.speed / 0.4) * dt;
       vehicle.wheels.forEach((w, i) => {
-        w.rotation.x += (state.speed / 0.38) * dt;
-        if (i < 2) w.rotation.y = state.steering * 0.4;
+        w.rotation.x += spinDelta;
+        if (i < 2) {
+          vehicle.wheelPivots[i].rotation.y = state.steering * 0.45;
+        }
       });
 
-      // Update UI
+      // Update HUD
       document.getElementById('speed').textContent = Math.abs(Math.round(state.speed * 3.6));
       document.getElementById('gear').textContent = state.speed < -0.1 ? 'R' : 'D';
     }
 
-    // --- CAMERA SMOOTH FOLLOWING ---
+    // --- SMOOTH CAMERA TRACKING ---
     const cameraTarget = new THREE.Vector3();
     const cameraPosTarget = new THREE.Vector3();
 
     function updateCamera(dt) {
       const camDistance = 10 + Math.abs(state.speed) * 0.08;
-      const camHeight = 4.0 + Math.abs(state.speed) * 0.02;
+      const camHeight = 3.8 + Math.abs(state.speed) * 0.02;
 
       const cx = state.x - Math.sin(state.heading) * camDistance;
       const cz = state.z - Math.cos(state.heading) * camDistance;
-      const cy = getGroundHeightAt(cx, cz) + camHeight;
+      const cy = getExactHeight(cx, cz) + camHeight;
 
-      cameraPosTarget.set(cx, Math.max(cy, getGroundHeightAt(cx, cz) + 1.5), cz);
+      cameraPosTarget.set(cx, Math.max(cy, getExactHeight(cx, cz) + 1.5), cz);
       camera.position.lerp(cameraPosTarget, 1 - Math.exp(-6 * dt));
 
       cameraTarget.set(
-        state.x + Math.sin(state.heading) * 5,
+        state.x + Math.sin(state.heading) * 6,
         state.smoothY + 1.2,
-        state.z + Math.cos(state.heading) * 5
+        state.z + Math.cos(state.heading) * 6
       );
       camera.lookAt(cameraTarget);
     }
@@ -486,7 +501,7 @@
       scene.background = newSky;
       scene.fog.color = newSky;
       sun.intensity = isNight ? 0.1 : 1.2;
-      hemiLight.intensity = isNight ? 0.15 : 0.7;
+      hemiLight.intensity = isNight ? 0.15 : 0.75;
     });
 
     // --- MAIN GAME LOOP ---
